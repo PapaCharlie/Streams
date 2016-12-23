@@ -1,0 +1,10 @@
+target/
+/.bash_history
+.idea/*
+!.idea/codeStyleSettings.xml
+!.idea/inspectionProfiles/Project_Default.xml
+!.idea/scalastyle_config.xml
+!.idea/runConfigurations/
+Makefile
+project/target/
+project/project/

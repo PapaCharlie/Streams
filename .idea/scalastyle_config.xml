@@ -1,0 +1,37 @@
+<scalastyle commentFilter="enabled">
+    <name>FITTT Style Checks</name>
+    <check enabled="true" class="org.scalastyle.file.FileLengthChecker" level="warning">
+        <parameters>
+            <parameter name="maxFileLength">800</parameter>
+        </parameters>
+    </check>
+    <check enabled="true" class="org.scalastyle.file.FileTabChecker" level="warning"/>
+    <check enabled="true" class="org.scalastyle.file.NewlineAtEofChecker" level="warning"/>
+    <check enabled="true" class="org.scalastyle.file.WhitespaceEndOfLineChecker" level="warning"/>
+    <check enabled="true" class="org.scalastyle.scalariform.CovariantEqualsChecker" level="warning"/>
+    <check enabled="true" class="org.scalastyle.scalariform.EqualsHashCodeChecker" level="warning"/>
+    <check enabled="true" class="org.scalastyle.scalariform.ForBraceChecker" level="warning"/>
+    <check enabled="true" class="org.scalastyle.scalariform.IfBraceChecker" level="warning">
+        <parameters>
+            <parameter name="singleLineAllowed">true</parameter>
+            <parameter name="doubleLineAllowed">true</parameter>
+        </parameters>
+    </check>
+    <!--Disabled until this issue is fixed https://github.com/scalastyle/scalastyle/issues/100-->
+    <check enabled="false" class="org.scalastyle.scalariform.MultipleStringLiteralsChecker" level="warning">
+        <parameters>
+            <parameter name="allowed">3</parameter>
+            <parameter name="ignoreRegex">^\&quot;\&quot;$</parameter>
+        </parameters>
+    </check>
+    <check enabled="true" class="org.scalastyle.scalariform.NonASCIICharacterChecker" level="warning"/>
+    <check enabled="true" class="org.scalastyle.scalariform.NullChecker" level="warning"/>
+    <!--Disabled until this issue is fixed https://github.com/scalastyle/scalastyle/issues/229-->
+    <check enabled="false" class="org.scalastyle.scalariform.PublicMethodsHaveTypeChecker" level="warning">
+        <parameters>
+            <parameter name="ignoreOverride">true</parameter>
+        </parameters>
+    </check>
+    <check enabled="true" class="org.scalastyle.scalariform.RedundantIfChecker" level="warning"/>
+    <check enabled="true" class="org.scalastyle.scalariform.StructuralTypeChecker" level="warning"/>
+</scalastyle>
