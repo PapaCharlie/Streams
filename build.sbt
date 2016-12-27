@@ -28,6 +28,9 @@ libraryDependencies ++= Seq(
   "com.amazonaws" % "amazon-kinesis-client" % "1.6.3",
   "com.amazonaws" % "aws-java-sdk-dynamodb" % "1.9.21",
   "com.twitter" %% "util-core" % "6.40.0",
+  "com.twitter" %% "bijection-util" % "0.9.4",
+
+  "org.joda" % "joda-convert" % "1.8.1",
 
   "org.mockito" % "mockito-core" % "1.10.19" % Test,
   "org.specs2" %% "specs2-core" % "3.8.3" % Test,

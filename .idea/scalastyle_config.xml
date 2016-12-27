@@ -25,7 +25,6 @@
         </parameters>
     </check>
     <check enabled="true" class="org.scalastyle.scalariform.NonASCIICharacterChecker" level="warning"/>
-    <check enabled="true" class="org.scalastyle.scalariform.NullChecker" level="warning"/>
     <!--Disabled until this issue is fixed https://github.com/scalastyle/scalastyle/issues/229-->
     <check enabled="false" class="org.scalastyle.scalariform.PublicMethodsHaveTypeChecker" level="warning">
         <parameters>
