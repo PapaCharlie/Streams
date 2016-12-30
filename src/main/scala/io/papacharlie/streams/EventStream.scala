@@ -2,29 +2,29 @@ package io.papacharlie.streams
 
 import com.twitter.concurrent.AsyncStream
 import com.twitter.util.Future
-import org.joda.time.DateTime
 
 abstract class EventStream {
   def eventConsumer: StreamEvent => Future[Unit]
   def committer: StreamOffsetCommitter
 
-  protected def mkStream(): AsyncStream[StreamEvent]
+  /**
+   * What to do when an exception is encountered:
+   *
+   * If true: Fail the stream and stop consuming
+   * If false: Keep consuming and commit failed events
+   */
+  def fatalExceptions: Boolean
 
-  private def foldStart: (DateTime, Int) = (DateTime.now(), 0)
-  private def commitFold(
-    acc: (DateTime, Int),
-    event: Future[StreamEvent]
-  ): Future[(DateTime, Int)] = {
-    
-  }
+  protected def mkStream(): AsyncStream[StreamEvent]
 
   lazy val consume: Future[Unit] = {
     mkStream()
       // Lazily consume the events
-      .map(event => eventConsumer(event) before Future.value(event))
-      // Actually start consuming and committing
-      .foldLeftF(foldStart)(commitFold)
+      .map(event => eventConsumer(event) before Future.value(event.streamOffset))
+      // Actually start consuming and committing. Since `committer.recv` returns "slow" Futures
+      // while committing, this foreachF will not call for more events until the old ones have been
+      // committed.
+      .foreachF(committer.recv)
       .unit
   }
 }
-
