@@ -2,6 +2,7 @@ package io.papacharlie.streams
 
 import com.twitter.conversions.time._
 import com.twitter.util._
+import io.papacharlie.streams.StreamOffsetCommitter.CommitterStoppedException
 import org.specs2.mutable.Specification
 import org.specs2.specification.Scope
 
@@ -88,6 +89,15 @@ class StreamOffsetCommitterTest extends Specification {
       Await.result(Future.Unit.delayed(3.seconds), 5.seconds)
       committer.commits.length must beEqualTo(1)
       committer.commits.head._2 must beEqualTo(offset(1))
+    }
+
+    "does not accept events after having been stopped" in new CommitterScope {
+      committer.stop()
+      Await.result(committer.recv(Future.value("")).liftToTry) match {
+        case Return(_) => failure("Committer accepted new value after stop() was called.")
+        case Throw(_: CommitterStoppedException) => ok
+        case Throw(ex) => throw ex
+      }
     }
   }
 }

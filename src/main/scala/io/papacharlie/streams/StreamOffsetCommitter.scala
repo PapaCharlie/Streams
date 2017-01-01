@@ -1,6 +1,6 @@
 package io.papacharlie.streams
 
-import com.twitter.concurrent.AsyncMutex
+import com.twitter.concurrent.{AsyncMutex, Offer}
 import com.twitter.util._
 import io.papacharlie.streams.StreamOffsetCommitter.CommitterStoppedException
 import scala.collection.mutable
@@ -41,15 +41,11 @@ abstract class StreamOffsetCommitter {
    */
   def recv(event: Future[String]): Future[Unit] = mutex.acquireAndRun {
     if (isStopped) {
-      Future.exception(
-        new CommitterStoppedException("Cannot call `recv` after having called `stop()`!")
-      )
+      throw new CommitterStoppedException("Cannot call `recv` after having called `stop()`!")
     }
-    // Always start the timer. `start` is lazy, so the timer will only be started once
+    // Always start the timed committer. Since `start` is lazy, this will only happen once
     start
-
     // Either it's a fresh start or we've just finished a batch
-
     if (eventQueue.isEmpty) {
       nextCommit = newTimeout
       // Always tell `loop` to check for the new commit schedule when this lock is released
@@ -93,13 +89,13 @@ abstract class StreamOffsetCommitter {
    * for its new schedule.
    */
   private[this] def loop(): Future[Unit] = {
-    if (isStopped) {
-      Future.Unit
-    } else {
-      newCommitReady()
-        .before(mutex.acquireAndRunSync(nextCommit)).flatten.or(_stop)
-        .before(commit())
-    }
+    Offer.prioritize(
+      newCommitReady().toOffer.mapConstFunction(loop()),
+      _stop.toOffer.mapConstFunction(mutex.acquireAndRun(commit())),
+      mutex.acquireAndRunSync(nextCommit).flatten.toOffer.mapConstFunction(
+        mutex.acquireAndRun(commit())
+      )
+    ).sync().flatten
   }
 
   /**
@@ -107,6 +103,8 @@ abstract class StreamOffsetCommitter {
    * [[stop()]] was called is committed.
    */
   lazy val start: Future[Unit] = loop()
+  def stopped: Future[Unit] = start
+  def isStopped: Boolean = _stop.isDefined
 
   private[this] val _stop: Promise[Unit] = new Promise()
   def stop(): Unit = if (_stop.setDone()) newCommitReady.asyncNotifyAll()
@@ -117,7 +115,6 @@ abstract class StreamOffsetCommitter {
       if (_stop.setDone()) newCommitReady.asyncNotifyAll()
     }
   )
-  def isStopped: Boolean = _stop.isDefined
 
   /** Used to synchronize between [[recv]] and [[loop()]] */
   private[this] val newCommitReady: AsyncCondition = new AsyncCondition(timer)

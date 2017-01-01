@@ -1,6 +1,5 @@
 package io.papacharlie.streams
 
-import com.twitter.conversions.time._
 import com.twitter.util.{Duration, Future, Time}
 import java.util.concurrent.ConcurrentLinkedQueue
 import scala.collection.JavaConverters._

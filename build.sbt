@@ -6,7 +6,7 @@ version := "0.1"
 
 scalaVersion := "2.11.8"
 
-scalacOptions := Seq(
+lazy val sharedScalacOptions = Seq(
   "-deprecation",
   "-encoding", "UTF-8",
   "-feature",
@@ -23,6 +23,9 @@ scalacOptions := Seq(
   "-Ywarn-nullary-override",
   "-Ywarn-nullary-unit"
 )
+
+scalacOptions in (Compile, console) := sharedScalacOptions
+scalacOptions in Compile := sharedScalacOptions :+ "-Ywarn-unused-import"
 
 libraryDependencies ++= Seq(
   "com.amazonaws" % "amazon-kinesis-client" % "1.6.3",
