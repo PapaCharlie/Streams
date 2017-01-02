@@ -1,9 +1,9 @@
 package io.papacharlie.streams
 
-import com.twitter.concurrent.{AsyncMutex, Offer}
+import com.twitter.concurrent.{Broker, Offer}
 import com.twitter.util._
 import io.papacharlie.streams.StreamOffsetCommitter.CommitterStoppedException
-import scala.collection.mutable
+import java.util.concurrent.atomic.AtomicBoolean
 
 abstract class StreamOffsetCommitter {
   private[this] implicit val timer = new JavaTimer()
@@ -12,7 +12,7 @@ abstract class StreamOffsetCommitter {
    * The maximum amount of time to wait between commits
    */
   def maxTimeBetweenCommits: Duration
-  private[this] def newTimeout: Future[Unit] = Future.Unit.delayed(maxTimeBetweenCommits)
+  private[this] def timeoutOffer: Offer[Unit] = Offer.timeout(maxTimeBetweenCommits)
 
   /**
    * The maximum number of processed events to leave uncommitted
@@ -24,6 +24,14 @@ abstract class StreamOffsetCommitter {
    * before fetching a new batch
    */
   def processInBatches: Boolean
+
+  /**
+   * What to do when an exception is encountered:
+   *
+   * If true: Fail the stream and stop consuming
+   * If false: Keep consuming and commit failed events
+   */
+  def fatalExceptions: Boolean
 
   /**
    * Based on `lastCheckpoint` and `eventsConsumedSinceCheckpoint`, decide if `event`'s offset
@@ -38,49 +46,18 @@ abstract class StreamOffsetCommitter {
    *
    * Returns a Future that's immediately resolved if there is no pending commit and more events can
    * be accepted, otherwise a Future that becomes resolved once the pending events are committed.
+   *
+   * Please make sure to wait for the resulting Future to be resolved before calling this method
+   * again.
    */
-  def recv(event: Future[String]): Future[Unit] = mutex.acquireAndRun {
+  def recv(event: Future[String]): Future[Unit] = {
     if (isStopped) {
-      throw new CommitterStoppedException("Cannot call `recv` after having called `stop()`!")
-    }
-    // Always start the timed committer. Since `start` is lazy, this will only happen once
-    start
-    // Either it's a fresh start or we've just finished a batch
-    if (eventQueue.isEmpty) {
-      nextCommit = newTimeout
-      // Always tell `loop` to check for the new commit schedule when this lock is released
-      newCommitReady.asyncNotifyAll()
-    }
-
-    eventQueue.enqueue(event)
-
-    // Wait for as many of these events to complete as possible
-    if (eventQueue.length >= maxEventsBetweenCommits) commit()
-    // Or accept more events
-    else Future.Unit
-  }
-
-  /**
-   * This function performs the commit if there are events to be committed, and will also reset the
-   * next scheduled commit.
-   *
-   * It removes the contiguous sequence of completed offsets starting at the head of [[eventQueue]],
-   * and commits the last offset in that sequence, if it exists.
-   *
-   * Any events that did not finish processing will be committed in the next commit.
-   *
-   * Note: Acquire [[mutex]] before calling.
-   */
-  private[this] def commit(): Future[Unit] = {
-    val (completed, remaining) =
-      (eventQueue.takeWhile(_.isDefined), eventQueue.dropWhile(_.isDefined))
-    eventQueue = remaining
-    val committed = completed.lastOption match {
-      case Some(offset) => offset.flatMap(commit)
-      case None => Future.Unit
-    }
-    committed ensure {
-      nextCommit = Future.never
+      Future.exception(
+        new CommitterStoppedException("Cannot call `recv` after having called `stop()`!")
+      )
+    } else {
+      val promise = new Promise[Unit]()
+      eventsBroker.sendAndSync((event, promise)) before promise
     }
   }
 
@@ -88,40 +65,71 @@ abstract class StreamOffsetCommitter {
    * This loop will always wake up when a commit is scheduled, or when [[recv]] tells it to check
    * for its new schedule.
    */
-  private[this] def loop(): Future[Unit] = {
+  private[this] def loop(
+    events: Seq[Future[String]],
+    processed: Int,
+    timeout: Offer[Unit],
+    toCommit: Option[String],
+    commitPromise: Option[Promise[Unit]]
+  ): Future[Unit] = {
+    val eventOffer =
+      if (processed >= maxEventsBetweenCommits) Offer.never
+      else eventsBroker.recv.map { case (event, promise) =>
+        val newTimeout = if (events.isEmpty) timeoutOffer else timeout
+        if (processed == maxEventsBetweenCommits - 1) {
+          loop(events :+ event, processed, newTimeout, toCommit, Some(promise))
+        } else {
+          promise.setDone()
+          loop(events :+ event, processed, newTimeout, toCommit, None)
+        }
+      }
     Offer.prioritize(
-      newCommitReady().toOffer.mapConstFunction(loop()),
-      _stop.toOffer.mapConstFunction(mutex.acquireAndRun(commit())),
-      mutex.acquireAndRunSync(nextCommit).flatten.toOffer.mapConstFunction(
-        mutex.acquireAndRun(commit())
-      )
+      events.headOption.getOrElse(Future.never).toOffer.map {
+        case Return(o) =>
+          loop(events.tail, processed + 1, timeout, toCommit = Some(o), commitPromise)
+        case Throw(ex) if fatalExceptions =>
+          throw ex
+        case Throw(_) =>
+          loop(events.tail, processed + 1, timeout, toCommit = toCommit, commitPromise)
+      },
+      (if (processed >= maxEventsBetweenCommits) Offer.const(()) else timeout).mapConstFunction {
+        toCommit
+          .map(commit)
+          .getOrElse(Future.Unit)
+          .before {
+            commitPromise.foreach(_.setDone())
+            loop(events, processed = 0, timeoutOffer, None, None)
+          }
+      },
+      eventOffer,
+      _stop.toOffer.mapConstFunction(toCommit.map(commit).getOrElse(Future.Unit)),
+      _forceStop.toOffer.mapConst(Future.Unit)
     ).sync().flatten
   }
+
+  private[this] val eventsBroker: Broker[(Future[String], Promise[Unit])] = new Broker()
 
   /**
    * A Future that becomes defined only after [[stop()]] is called, and any batch in flight while
    * [[stop()]] was called is committed.
    */
-  lazy val start: Future[Unit] = loop()
+  lazy val start: Future[Unit] = loop(Seq.empty, 0, Offer.never, None, None)
   def stopped: Future[Unit] = start
-  def isStopped: Boolean = _stop.isDefined
+
+  private[this] val _stopped: AtomicBoolean = new AtomicBoolean(false)
+  def isStopped: Boolean = _stopped.get
 
   private[this] val _stop: Promise[Unit] = new Promise()
-  def stop(): Unit = if (_stop.setDone()) newCommitReady.asyncNotifyAll()
-  def forceStop(): Unit = Await.result(
-    mutex.acquireAndRunSync {
-      // Just drop all events, processed or not
-      eventQueue = mutable.Queue()
-      if (_stop.setDone()) newCommitReady.asyncNotifyAll()
-    }
-  )
+  def stop(): Unit = {
+    _stop.setDone()
+    _stopped.set(true)
+  }
 
-  /** Used to synchronize between [[recv]] and [[loop()]] */
-  private[this] val newCommitReady: AsyncCondition = new AsyncCondition(timer)
-
-  private[this] val mutex: AsyncMutex = new AsyncMutex()
-  @volatile private[this] var nextCommit: Future[Unit] = Future.never
-  @volatile private[this] var eventQueue: mutable.Queue[Future[String]] = mutable.Queue()
+  private[this] val _forceStop: Promise[Unit] = new Promise()
+  def forceStop(): Unit = {
+    _forceStop.setDone()
+    _stopped.set(true)
+  }
 }
 
 object StreamOffsetCommitter {

@@ -11,6 +11,7 @@ class StreamOffsetCommitterTest extends Specification {
     protected implicit val timer = new JavaTimer
     protected def maxTimeBetweenCommits: Duration = 1.second
     protected val committer = new TestStreamOffsetCommitter(maxTimeBetweenCommits)
+    committer.start
     protected def offset(i: Int) = s"offset$i"
   }
 
@@ -57,6 +58,23 @@ class StreamOffsetCommitterTest extends Specification {
       Await.result(Future.Unit.delayed(2.seconds))
       committer.commits.length must beEqualTo(1)
       committer.commits.head._2 must beEqualTo(offset(1))
+    }
+
+    "waits for commits to finish before receiving new events" in {
+      val promise = new Promise[Unit]()
+      val committer = new StreamOffsetCommitter {
+        def fatalExceptions: Boolean = true
+        def maxEventsBetweenCommits: Int = 1
+        def processInBatches: Boolean = false
+        def maxTimeBetweenCommits: Duration = 1.second
+        def commit(offset: String): Future[Unit] = promise
+      }
+      committer.start
+      val future = committer.recv(Future.value(""))
+      try Await.result(future, 10.milliseconds) catch {case _: TimeoutException =>}
+      promise.setDone()
+      Await.result(future, 1.second)
+      ok
     }
 
     "stops but waits for the current batch to finish" in new CommitterScope {

@@ -7,14 +7,6 @@ abstract class EventStream {
   def eventConsumer: StreamEvent => Future[Unit]
   def committer: StreamOffsetCommitter
 
-  /**
-   * What to do when an exception is encountered:
-   *
-   * If true: Fail the stream and stop consuming
-   * If false: Keep consuming and commit failed events
-   */
-  def fatalExceptions: Boolean
-
   protected def mkStream(): AsyncStream[StreamEvent]
 
   lazy val consume: Future[Unit] = {
