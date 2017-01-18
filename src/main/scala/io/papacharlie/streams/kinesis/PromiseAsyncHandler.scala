@@ -1,4 +1,4 @@
-package io.papacharlie.streams
+package io.papacharlie.streams.kinesis
 
 import com.amazonaws.AmazonWebServiceRequest
 import com.amazonaws.handlers.AsyncHandler

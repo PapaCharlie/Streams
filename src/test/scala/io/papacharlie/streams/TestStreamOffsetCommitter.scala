@@ -7,7 +7,7 @@ import scala.collection.JavaConverters._
 class TestStreamOffsetCommitter(val maxTimeBetweenCommits: Duration) extends StreamOffsetCommitter {
   def fatalExceptions: Boolean = true
   def maxEventsBetweenCommits = 2
-  def processInBatches = false
+  def maxEventsInFlight: Int = Int.MaxValue
   def commit(offset: String) = Future.value(_commits.add((Time.now, offset)))
 
   private[this] val _commits: ConcurrentLinkedQueue[(Time, String)] = new ConcurrentLinkedQueue()

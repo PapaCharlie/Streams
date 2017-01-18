@@ -9,14 +9,18 @@ abstract class EventStream {
 
   protected def mkStream(): AsyncStream[StreamEvent]
 
+  /**
+   * Start asking for more events from the stream and consuming them. Commits will happen based on
+   * the commit policy defined in [[committer]].
+   *
+   * This Future will become defined if [[committer.stop()]] or [[committer.forceStop()]] are
+   * called, of if [[committer.fatalExceptions]] is set to true and [[eventConsumer]] returns a
+   * failed Future.
+   */
   lazy val consume: Future[Unit] = {
-    mkStream()
-      // Lazily consume the events
-      .map(event => eventConsumer(event) before Future.value(event.streamOffset))
-      // Actually start consuming and committing. Since `committer.recv` returns "slow" Futures
-      // while committing, this foreachF will not call for more events until the old ones have been
-      // committed.
-      .foreachF(committer.recv)
-      .unit
+    // Start consuming the stream, and giving the committer new events.
+    mkStream().foreachF(event => committer.recv(event.streamOffset, eventConsumer(event)))
+    // Start the committer
+    committer.start
   }
 }

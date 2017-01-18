@@ -1,14 +1,15 @@
-package io.papacharlie.streams
+package io.papacharlie.streams.kinesis
 
 import com.amazonaws.services.kinesis.AmazonKinesisAsyncClient
 import com.amazonaws.services.kinesis.model._
 import com.twitter.concurrent.AsyncStream
 import com.twitter.util.{Future, Promise}
+import io.papacharlie.streams.{EventStream, StreamEvent, StreamOffsetCommitter}
 import scala.collection.JavaConverters._
 
 /**
- * An [[EventStream]] for Kinesis. It will fetch [[getRecordsRequestLimit]] per call to Kinesis,
- * so you may find it advantageous to set it to some multiple of
+ * An [[io.papacharlie.streams.EventStream]] for Kinesis. It will fetch [[getRecordsRequestLimit]]
+ * per call to Kinesis, so you may find it advantageous to set it to some multiple of
  * [[committer.maxEventsBetweenCommits]] so that it approximates prefetching, without actually
  * processing/committing any events.
  *
@@ -17,8 +18,8 @@ import scala.collection.JavaConverters._
  * @param getRecordsRequestLimit Number of events to fetch from Kinesis per fetch call
  * @param initialShardIterator   Shard iterator for stream
  * @param eventConsumer          Function with which to consume events
- * @param committer              An instance of [[StreamOffsetCommitter]] that describes the commit
- *                               policy
+ * @param committer              An instance of [[io.papacharlie.streams.StreamOffsetCommitter]]
+ *                               that describes the commit policy
  */
 class KinesisEventStream(
   client: AmazonKinesisAsyncClient,
@@ -35,10 +36,10 @@ class KinesisEventStream(
           val futureResults = getRecords(i)
           AsyncStream.Cons(
             futureResults map { results =>
-              AsyncStream.fromSeq(results.getRecords.asScala.map(new StreamEvent(_)))
+              AsyncStream.fromSeq(results.getRecords.asScala.map(new KinesisStreamEvent(_)))
             },
             () => AsyncStream.fromFuture(
-              futureResults.map(results => streams(Option(results.getNextShardIterator)))
+              futureResults map (results => streams(Option(results.getNextShardIterator)))
             ).flatten
           )
         case None => AsyncStream.empty
